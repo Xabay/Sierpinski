@@ -1,0 +1,10 @@
+^C:\USERS\MOO\DOCUMENTS\EGYETEM\GPUPROG\SIERPINSKI\.VSCODE\BUILD\CMAKEFILES\B90CFEC369645430FF05D2C192B8DA29\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/MOO/Documents/Egyetem/GPUprog/Sierpinski -BC:/Users/MOO/Documents/Egyetem/GPUprog/Sierpinski/.vscode/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/MOO/Documents/Egyetem/GPUprog/Sierpinski/.vscode/build/HelloVSCode.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

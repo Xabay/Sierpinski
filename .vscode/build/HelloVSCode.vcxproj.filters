@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\MOO\Documents\Egyetem\GPUprog\Sierpinski\Main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\MOO\Documents\Egyetem\GPUprog\Sierpinski\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{80BB092D-53E2-3747-9043-9323ED7E0CAC}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
