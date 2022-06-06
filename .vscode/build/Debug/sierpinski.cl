@@ -3,7 +3,7 @@ __constant sampler_t sampler =
     | CLK_ADDRESS_CLAMP_TO_EDGE
     | CLK_FILTER_NEAREST;
 
-__kernel void sobel(read_only image2d_t src, write_only image2d_t dst)
+__kernel void sierpinski(read_only image2d_t src, write_only image2d_t dst)
 {
     
 	int x = get_global_id(0);

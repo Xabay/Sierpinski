@@ -45,7 +45,7 @@ static int GDIPlus_GetEncoderClsid(const wchar_t* format, CLSID* pClsid)
 	return -1; // Failure
 }
 
-std::vector<float> sierpinski_simple(std::vector<float> prevIter, size_t W, size_t H, int depth) {
+std::vector<float> sierpinski_simple(std::vector<float> const& prevIter, size_t W, size_t H, int depth) {
 
 	//if at the end of recursion return with the result
 	if(depth <= 0) {
@@ -91,30 +91,27 @@ std::vector<float> sierpinski_simple(std::vector<float> prevIter, size_t W, size
 	return sierpinski_simple(nextIter, W, H, depth-1);
 }
 
-std::vector<float> sierpinski_concurrent(std::vector<float> image_data, size_t width, size_t height, int depth) {
+std::vector<float> sierpinski_concurrent(std::vector<float> const& prevIter, size_t W, size_t H, int depth) {
 	if(depth <= 0) {
-		return image_data;
+		return prevIter;
 	}
-	static size_t W = width;
-	static size_t H = height;
 	
-	static std::vector<float> prevIter = image_data;
-	static std::vector<float> nextIter(W*H*4);
+	std::vector<float> nextIter(W*H*4);
 	std::vector<std::thread> threads;
 	auto start_t = std::chrono::high_resolution_clock::now();
 	auto cores = std::thread::hardware_concurrency();
 	for (int i=0; i<cores; ++i) {
 
 		//divide picture into vertical stripes based on the number of available threads
-		int x_start = i*W/cores;
-		int x_end = (i+1)*W/cores;
+		int y_start = i*H/cores;
+		int y_end = (i+1)*H/cores;
 
 		
 		//process each stripe with separate thread
-		std::thread new_thread ([](int start, int end) {
-			for(int y=0; y<H; y+=2)
+		std::thread new_thread ([](std::vector<float> const& prevIter, std::vector<float>& nextIter, size_t W, size_t H, int start, int end) {
+			for(int y=start; y<end; y+=2)
 				{
-					for(int x=start; x<end; x+=2)
+					for(int x=0; x<W; x+=2)
 					{
 						float a = prevIter[(y*W + x) * 4 + 0];
 						float r = prevIter[(y*W + x) * 4 + 1];
@@ -137,7 +134,7 @@ std::vector<float> sierpinski_concurrent(std::vector<float> image_data, size_t w
 						nextIter[((y/2)*W +  x/2 + W/4) * 4 + 3] = b;
 					}
 				}
-		}, x_start, x_end);
+		},std::cref(prevIter), std::ref(nextIter), W, H, y_start, y_end);
 
 		threads.push_back(std::move(new_thread));
 	}
@@ -167,21 +164,24 @@ int main()
 
 	cl_platform_id platform = NULL;
 	auto status = clGetPlatformIDs(1, &platform, NULL);
-
+	
 	cl_device_id device = NULL;
 	status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+	if (status != CL_SUCCESS){ printf("Failed to get device!\n"); }
 
 	cl_context_properties cps[] = { CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0 };
 	auto context = clCreateContext(cps, 1, &device, 0, 0, &status);
+	if (status != CL_SUCCESS){ printf("Context creation failed!\n"); }
 
-	//modified!!
 	auto queue = clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &status);
+	if (status != CL_SUCCESS){ printf("Queue creation failed!\n"); }
 
-	std::ifstream file("sobel.cl");
+	std::ifstream file("sierpinski.cl");
 	std::string source( std::istreambuf_iterator<char>(file), (std::istreambuf_iterator<char>()));
 	size_t      sourceSize = source.size();
 	const char* sourcePtr  = source.c_str();
 	auto program = clCreateProgramWithSource(context, 1, &sourcePtr, &sourceSize, &status);
+	if (status != CL_SUCCESS){ printf("Program creation failed!\n"); }
 	
 	status = clBuildProgram(program, 1, &device, "", nullptr, nullptr);
 	if (status != CL_SUCCESS)
@@ -194,11 +194,13 @@ int main()
 		return -1;
 	}
 
-	auto kernel = clCreateKernel(program, "sobel", &status);
-	if(status == CL_INVALID_KERNEL_NAME) printf("found the problem\n");
+	auto kernel = clCreateKernel(program, "sierpinski", &status);
+	if (status != CL_SUCCESS){ printf("Kernel creation failed!\n"); }
 
 	
     std::vector<float> image_data(W*H*4);
+	std::vector<float> image_data_cpu(W*H*4);
+	std::vector<float> image_data_concurrent(W*H*4);
 	std::vector<float> empty_data(W*H*4, 0);
     
     Rect rct; rct.X = 0; rct.Y = 0; rct.Width = W; rct.Height = H;
@@ -225,19 +227,26 @@ int main()
     cl_image_format format = { CL_RGBA, CL_FLOAT };
 	
 	cl_mem img_src, img_dst;
-	int lvl = 5;
+	int lvl = 9;
 	
-	sierpinski_simple(image_data, W, H, lvl);
-	sierpinski_concurrent(image_data, W, H, lvl);
+	image_data_cpu = sierpinski_simple(std::cref(image_data), W, H, lvl);
+	image_data_concurrent = sierpinski_concurrent(std::cref(image_data), W, H, lvl);
+
+
+
+	img_src = clCreateImage2D(context, CL_MEM_READ_WRITE  | CL_MEM_USE_HOST_PTR, &format, W, H, 0, image_data.data(), &status);
+	if (status != CL_SUCCESS){ printf("Image allocation failed!\n"); }
+	img_dst = clCreateImage2D(context, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, &format, W, H, 0, empty_data.data(), &status);
+	if (status != CL_SUCCESS){ printf("Image allocation failed!\n"); }
+
+	
 
 	for(int i=0; i<lvl; ++i) {
-		img_src = clCreateImage2D(context, CL_MEM_READ_ONLY  | CL_MEM_COPY_HOST_PTR, &format, W, H, 0, image_data.data(), &status);
-		if (status != CL_SUCCESS){ printf("Image allocation failed!\n"); }
-		img_dst = clCreateImage2D(context, CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR, &format, W, H, 0, empty_data.data(), &status);
-		if (status != CL_SUCCESS){ printf("Image allocation failed!\n"); }
 
 		status = clSetKernelArg(kernel, 0, sizeof(img_src), &img_src);
+		if (status != CL_SUCCESS){ printf("Failed to set first kernel arg!\n"); }
 		status = clSetKernelArg(kernel, 1, sizeof(img_dst), &img_dst);
+		if (status != CL_SUCCESS){ printf("Failed to set second kernel arg!\n"); }
 
 		cl_event ev;
 		cl_ulong t_start, t_end;
@@ -245,15 +254,30 @@ int main()
 
 		size_t kernel_dims[2] = {W, H};
 		status = clEnqueueNDRangeKernel(queue, kernel, 2, nullptr, kernel_dims, nullptr, 0, nullptr, &ev);
+		if (status != CL_SUCCESS){ printf("Failed to enqueue command!\n"); }
 		status = clWaitForEvents(1, &ev);
+		if (status != CL_SUCCESS){ printf("Failed to wait for event!\n"); }
 		status = clGetEventProfilingInfo(ev, CL_PROFILING_COMMAND_START, sizeof(t_start), &t_start, nullptr);
+		if (status != CL_SUCCESS){ printf("Failed to get start event info!\n"); }
 		status = clGetEventProfilingInfo(ev, CL_PROFILING_COMMAND_END, sizeof(t_end), &t_end, nullptr);
+		if (status != CL_SUCCESS){ printf("Failed to get end event info!\n"); }
+
+		clReleaseEvent(ev);
 
 		size_t origin[3] = {0, 0, 0};
 		size_t dims[3] = {W, H, 1};
 		image_data = std::vector<float>(W*H*4, 1);
 		status = clEnqueueReadImage(queue, img_dst, false, origin, dims, 0, 0, image_data.data(), 0, nullptr, nullptr);
+		if (status != CL_SUCCESS){ printf("Reading image failed!\n"); }
+
+		status = clEnqueueCopyImage(queue, img_dst, img_src, origin, origin, dims, 0, nullptr, nullptr);
+		if (status != CL_SUCCESS){ printf("Failed to copy image!\n"); }
+
 		status = clFinish(queue);
+		if (status != CL_SUCCESS){ printf("Failed to wait for the queue!\n"); }
+		
+
+		
 
 		std::cout<<"Current iteration took " << (t_end - t_start) * 0.001 * 0.001 << " msecs on gpu implementation.\n";
 	}
@@ -283,7 +307,44 @@ int main()
         }
     }
     bmp.UnlockBits(&bmpdata2);
-    bmp.Save( L"output.png", &Clsid );
+    bmp.Save( L"output_gpu.png", &Clsid );
+
+    if( bmp.LockBits(&rct, ImageLockModeWrite, PixelFormat32bppARGB, &bmpdata2) == Status::Ok )
+    {
+        for(int y=0; y<H; ++y)
+        {
+            for(int x=0; x<W; ++x)
+            {
+                auto r = (BYTE)(image_data_cpu[(y*W+x)*4 + 0] * 255.0);
+                auto g = (BYTE)(image_data_cpu[(y*W+x)*4 + 1] * 255.0);
+                auto b = (BYTE)(image_data_cpu[(y*W+x)*4 + 2] * 255.0);
+                auto a = (BYTE)(image_data_cpu[(y*W+x)*4 + 3] * 255.0);
+
+                ((Color*)bmpdata2.Scan0)[y * bmpdata2.Stride / 4 + x] = Color(a, r, g, b);
+            }
+        }
+    }
+    bmp.UnlockBits(&bmpdata2);
+    bmp.Save( L"output_cpu.png", &Clsid );
+
+
+    if( bmp.LockBits(&rct, ImageLockModeWrite, PixelFormat32bppARGB, &bmpdata2) == Status::Ok )
+    {
+        for(int y=0; y<H; ++y)
+        {
+            for(int x=0; x<W; ++x)
+            {
+                auto r = (BYTE)(image_data_concurrent[(y*W+x)*4 + 0] * 255.0);
+                auto g = (BYTE)(image_data_concurrent[(y*W+x)*4 + 1] * 255.0);
+                auto b = (BYTE)(image_data_concurrent[(y*W+x)*4 + 2] * 255.0);
+                auto a = (BYTE)(image_data_concurrent[(y*W+x)*4 + 3] * 255.0);
+
+                ((Color*)bmpdata2.Scan0)[y * bmpdata2.Stride / 4 + x] = Color(a, r, g, b);
+            }
+        }
+    }
+    bmp.UnlockBits(&bmpdata2);
+    bmp.Save( L"output_concurrent.png", &Clsid );
 
 
     clReleaseMemObject(img_src);
