@@ -266,7 +266,6 @@ int main()
 
 		size_t origin[3] = {0, 0, 0};
 		size_t dims[3] = {W, H, 1};
-		image_data = std::vector<float>(W*H*4, 1);
 		status = clEnqueueReadImage(queue, img_dst, false, origin, dims, 0, 0, image_data.data(), 0, nullptr, nullptr);
 		if (status != CL_SUCCESS){ printf("Reading image failed!\n"); }
 
